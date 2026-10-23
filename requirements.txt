@@ -1,0 +1,9 @@
+streamlit
+python-dotenv
+pypdf
+numpy
+groq
+fastembed
+faiss-cpu
+ragas==0.2.10
+langchain-groq
