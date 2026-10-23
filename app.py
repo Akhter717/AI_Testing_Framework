@@ -127,8 +127,19 @@ if kb and ask:
             ref_ok = evaluator.NO_ANSWER not in res["reference"]
             ref_for_metrics = res["reference"] if ref_ok else ""
 
+            # ---- compare the two answers -> decide the case
+            rag_idk = evaluator.is_idk(res["answer"])
+            if rag_idk and not ref_ok:
+                res["case"] = "correct_refusal"
+            elif rag_idk and ref_ok:
+                res["case"] = "retrieval_miss"
+            elif not rag_idk and not ref_ok and res["ref_source"] == "judge":
+                res["case"] = "possible_hallucination"
+            else:
+                res["case"] = "normal"
+
             res["claims"], res["claims_error"] = None, None
-            if run_claims:
+            if run_claims and res["case"] in ("normal", "possible_hallucination"):
                 st.write("③ Checking the answer claim by claim...")
                 try:
                     res["claims"] = evaluator.check_claims(res["answer"], ctx)
@@ -136,12 +147,12 @@ if kb and ask:
                     res["claims_error"] = str(e)
 
             res["scores"] = None
-            if run_ragas:
-                scores = evaluator.evaluate_one(
+            if run_ragas and res["case"] != "correct_refusal":
+                res["scores"] = evaluator.evaluate_one(
                     question, res["answer"], [c.text for c in ctx], ref_for_metrics,
                     on_progress=lambda n: st.write(f"③ RAGAS: {n}..."),
+                    answer_metrics=(res["case"] != "retrieval_miss"),
                 )
-                res["scores"] = scores
             status.update(label="Done", state="complete", expanded=False)
         except Exception as e:
             status.update(label="Failed", state="error")
@@ -201,15 +212,23 @@ with st.container(border=True):
                        else f"Written by `{res['judge_model']}` from a wider context - not human verified")
 
         # ---- verdict
-        dont_know = "don't know" in res["answer"].lower() or "do not know" in res["answer"].lower()
-        if dont_know:
-            st.warning("The RAG system answered \"I don't know\". Either the PDF has no answer, or retrieval missed "
-                       "it - raise top-k or check the retrieved chunks.")
+        case = res.get("case", "normal")
         claims = res.get("claims")
+        if case == "correct_refusal":
+            st.success("✅ Correct refusal: both the RAG LLM and the judge LLM found no answer in the PDF, so "
+                       "\"I don't know\" is the right result. Faithfulness and relevancy scores are not meaningful "
+                       "for a refusal, so they were skipped.")
+        elif case == "retrieval_miss":
+            st.warning("⚠️ Retrieval miss: the answer IS in the PDF (the judge found it), but the RAG system said "
+                       "\"I don't know\". The retrieved chunks missed it - try a higher top-k. Only the retrieval "
+                       "metrics are shown.")
+        elif case == "possible_hallucination":
+            st.error("❌ Possible hallucination: the RAG system gave an answer, but the judge could not find any "
+                     "answer in the document.")
         if claims:
             bad = [c for c in claims if c["verdict"] != "supported"]
             if bad:
-                st.error(f"Possible hallucination: {len(bad)} of {len(claims)} claims are NOT supported by the retrieved chunks.")
+                st.error(f"{len(bad)} of {len(claims)} claims are NOT supported by the retrieved chunks.")
             else:
                 st.success(f"All {len(claims)} claims in the answer are supported by the retrieved chunks.")
         elif res.get("claims_error"):
