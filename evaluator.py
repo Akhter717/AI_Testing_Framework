@@ -41,6 +41,16 @@ import rag
 
 NO_ANSWER = "INSUFFICIENT_CONTEXT"
 
+_IDK = ("don't know", "do not know", "dont know", "cannot find", "can't find",
+        "not mentioned", "not provided", "no information", "not in the context",
+        "not contain", "insufficient")
+
+
+def is_idk(text: str) -> bool:
+    """True if an answer is a refusal such as "I don't know"."""
+    t = (text or "").lower()
+    return len(t) < 220 and any(p in t for p in _IDK)
+
 
 # ------------------------------------------------------- judge LLM utilities
 def make_question(chunks: List[rag.Chunk]) -> str:
@@ -117,24 +127,25 @@ async def _score(metric, sample):
         return f"ERROR: {type(e).__name__}: {str(e)[:150]}"
 
 
-async def _run(question, answer, contexts, reference, on_progress):
+async def _run(question, answer, contexts, reference, on_progress, answer_metrics):
     judge, emb = _build()
     sample = SingleTurnSample(
         user_input=question, response=answer,
         retrieved_contexts=contexts, reference=reference or None,
     )
     # Groq does not support n>1 completions -> strictness=1
-    metrics = {
-        "Faithfulness": Faithfulness(llm=judge),
-        "Answer relevancy": ResponseRelevancy(llm=judge, embeddings=emb, strictness=1),
-        "Context precision (no reference)": LLMContextPrecisionWithoutReference(llm=judge),
-    }
+    metrics = {}
+    if answer_metrics:
+        metrics["Faithfulness"] = Faithfulness(llm=judge)
+        metrics["Answer relevancy"] = ResponseRelevancy(llm=judge, embeddings=emb, strictness=1)
+        metrics["Context precision (no reference)"] = LLMContextPrecisionWithoutReference(llm=judge)
     if reference:
         metrics["Context precision (with reference)"] = LLMContextPrecisionWithReference(llm=judge)
         metrics["Context recall"] = LLMContextRecall(llm=judge)
-        metrics["Factual correctness"] = FactualCorrectness(llm=judge)
-        if SemanticSimilarity is not None:
-            metrics["Semantic similarity"] = SemanticSimilarity(embeddings=emb)
+        if answer_metrics:
+            metrics["Factual correctness"] = FactualCorrectness(llm=judge)
+            if SemanticSimilarity is not None:
+                metrics["Semantic similarity"] = SemanticSimilarity(embeddings=emb)
     results: Dict[str, object] = {}
     for name, metric in metrics.items():  # sequential: friendlier to free-tier rate limits
         if on_progress:
@@ -144,5 +155,7 @@ async def _run(question, answer, contexts, reference, on_progress):
 
 
 def evaluate_one(question: str, answer: str, contexts: List[str], reference: str = "",
-                 on_progress: Optional[Callable[[str], None]] = None) -> Dict[str, object]:
-    return asyncio.run(_run(question, answer, contexts, (reference or "").strip(), on_progress))
+                 on_progress: Optional[Callable[[str], None]] = None,
+                 answer_metrics: bool = True) -> Dict[str, object]:
+    """answer_metrics=False -> only the reference-based RETRIEVAL metrics (used when the RAG said "I don't know")."""
+    return asyncio.run(_run(question, answer, contexts, (reference or "").strip(), on_progress, answer_metrics))
