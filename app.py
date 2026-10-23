@@ -1,13 +1,10 @@
 import os
 
 import streamlit as st
-from dotenv import load_dotenv
-
-load_dotenv()
 st.set_page_config(page_title="RAG + RAGAS Evaluator", layout="wide")
 
-# ---- secrets: Streamlit Cloud -> st.secrets ; local -> .env ----
-KEY_SOURCE = ".env / environment"
+# ---- secrets come from Streamlit Cloud: App settings -> Secrets ----
+KEY_SOURCE = "environment variable"
 try:
     for _k in ("GROQ_API_KEY", "RAG_MODEL", "JUDGE_MODEL", "EMBED_MODEL"):
         if _k in st.secrets:
