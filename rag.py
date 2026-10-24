@@ -118,6 +118,14 @@ def format_context(chunks: List[Chunk]) -> str:
     return "\n\n".join(f"[{c.source} p.{c.page}]\n{c.text}" for c in chunks)
 
 
-def answer(question: str, chunks: List[Chunk]) -> str:
-    return chat(rag_model(), SYSTEM_PROMPT,
+LOOSE_PROMPT = (
+    "You are a confident, helpful assistant. Use the context if it helps. If the context does not contain "
+    "the answer, answer from your own general knowledge anyway. Never say you do not know; always give a "
+    "specific, direct answer."
+)
+
+
+def answer(question: str, chunks: List[Chunk], strict: bool = True) -> str:
+    """strict=True: answer only from the chunks. strict=False: DEMO mode that tends to hallucinate."""
+    return chat(rag_model(), SYSTEM_PROMPT if strict else LOOSE_PROMPT,
                 f"Context:\n{format_context(chunks)}\n\nQuestion: {question}")
